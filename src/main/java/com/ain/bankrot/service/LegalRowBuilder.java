@@ -16,16 +16,14 @@ public class LegalRowBuilder {
     private final ObjectMapper om = new ObjectMapper();
     private final CompanyMapper companyMapper = new CompanyMapper();
 
-    private static final boolean DEBUG_TRADES = true;
-
     public LegalRowBuilder(ApiClient fed) {
         this.fed = fed;
     }
 
     public LegalEntityRow buildFromListItem(JsonNode itemFromBankrotList) throws Exception {
-        String guid = itemFromBankrotList.path("guid").asText("");
+        String bankruptGuid = itemFromBankrotList.path("guid").asText(""); // это bankruptGuid для biddings
         LegalEntityRow row = new LegalEntityRow();
-        if (guid.isBlank()) return row;
+        if (bankruptGuid.isBlank()) return row;
 
         // -----------------------------
         // 1) ДАННЫЕ ИЗ СПИСКА (bankrot.*) — lastLegalCase
@@ -41,14 +39,12 @@ public class LegalRowBuilder {
         String statusName = last.path("status").path("name").asText("");
         String statusDesc = last.path("status").path("description").asText("");
 
-        // ✅ ProcedureType (процедура): Наблюдение / Конкурсное / ...
         row.procedureType = firstNonBlank(
                 extractProcedureTypeFromLastLegalCase(last),
                 looksLikeProcedure(statusName) ? statusName : "",
                 looksLikeProcedure(statusDesc) ? statusDesc : ""
         );
 
-        // ✅ CaseStatus (статус дела): Активно / Завершено
         row.caseStatus = firstNonBlank(
                 statusFromBooleans(itemFromBankrotList),
                 statusFromBooleans(last)
@@ -76,17 +72,8 @@ public class LegalRowBuilder {
                 last.path("arbitrManagerSince").asText("")
         ));
 
-        // ✅ CaseEndDate — попытка №1: из lastLegalCase
-        String endFromLast = firstNonBlank(
-                last.path("caseEndDate").asText(""),
-                last.path("endDate").asText(""),
-                last.path("dateEnd").asText(""),
-                last.path("finishDate").asText(""),
-                last.path("completionDate").asText(""),
-                last.path("dateFinish").asText(""),
-                last.path("dateCompletion").asText("")
-        );
-        row.caseEndDate = Dates.toDdMmYyyyFromIsoDateTime(endFromLast);
+        // ❌ БОЛЬШЕ НЕ БЕРЁМ CaseEndDate из lastLegalCase
+        // row.caseEndDate = ... (удалено)
 
         row.region = firstNonBlank(
                 itemFromBankrotList.path("region").path("name").asText(""),
@@ -94,9 +81,16 @@ public class LegalRowBuilder {
         );
 
         // -----------------------------
-        // 2) КАРТОЧКА КОМПАНИИ (fedresurs.ru)
+        // 2) КАРТОЧКА КОМПАНИИ (fedresurs.ru/backend/companies/{guid})
         // -----------------------------
-        String companyPath = FedresursEndpoints.company(guid);
+        String companyGuid = firstNonBlank(
+                itemFromBankrotList.path("companyGuid").asText(""),
+                itemFromBankrotList.path("company").path("guid").asText(""),
+                itemFromBankrotList.path("debtor").path("guid").asText(""),
+                bankruptGuid
+        );
+
+        String companyPath = FedresursEndpoints.company(companyGuid);
         String companyJson = fed.get(companyPath, refererFed());
         LegalEntityRow base = companyMapper.fromCompanyJson(companyJson, "https://fedresurs.ru" + companyPath);
 
@@ -104,66 +98,62 @@ public class LegalRowBuilder {
 
         if (row.region.isBlank()) row.region = RegionExtractor.extract(row.address);
 
+        // ✅ CaseEndDate = companies.status.date (жёстко и только так)
+        row.caseEndDate = extractCaseEndDateFromCompany(companyJson);
+
         // -----------------------------
         // 3) PublicationsCount
         // -----------------------------
-        row.publicationsCount = readCountSafe(FedresursEndpoints.companyPublications(guid, 1, 0), false);
+        row.publicationsCount = readCountSafe(FedresursEndpoints.companyPublications(companyGuid, 1, 0));
 
         // -----------------------------
-        // 4) TradesCount
+        // 4) TradesCount — /backend/biddings?bankruptGuid=...
         // -----------------------------
-        row.tradesCount = readCountSafe(FedresursEndpoints.companyTrades(guid, 1, 0), true);
-        if (row.tradesCount == null || row.tradesCount.isBlank()) row.tradesCount = "н/д";
+        row.tradesCount = readCountSafe(FedresursEndpoints.biddingsByBankruptGuid(bankruptGuid, 1, 0));
 
         // -----------------------------
-        // 5) BANKRUPTCY DETAILS → CaseEndDate (попытка №2) + статус из boolean
+        // 5) BANKRUPTCY DETAILS
+        // ❌ CaseEndDate оттуда больше НЕ трогаем (только статус дела при желании)
         // -----------------------------
-        fillFromBankruptcy(row, guid);
-
-        if (row.caseEndDate == null || row.caseEndDate.isBlank()) row.caseEndDate = "н/д";
-        if (row.caseStatus == null || row.caseStatus.isBlank()) row.caseStatus = "Активно";
+        fillFromBankruptcy(row, companyGuid);
 
         // -----------------------------
-        // 6) IEB → INN управляющего + дата внесения (не затираем)
+        // 6) IEB → INN управляющего + дата (если есть в проекте)
         // -----------------------------
-        fillFromIeb(row, guid);
+        fillFromIeb(row, companyGuid);
 
         return row;
     }
 
-    // =========================================================
-    // Bankruptcy block
-    // =========================================================
-    private void fillFromBankruptcy(LegalEntityRow row, String guid) {
+    private String extractCaseEndDateFromCompany(String companyJson) {
         try {
-            String bjson = fed.get(FedresursEndpoints.companyBankruptcy(guid), refererFed());
+            JsonNode croot = om.readTree(companyJson);
+            String iso = croot.path("status").path("date").asText("");
+            String ddmmyyyy = Dates.toDdMmYyyyFromIsoDateTime(iso);
+            return (ddmmyyyy == null || ddmmyyyy.isBlank()) ? "н/д" : ddmmyyyy;
+        } catch (Exception e) {
+            return "н/д";
+        }
+    }
+
+    private void fillFromBankruptcy(LegalEntityRow row, String companyGuid) {
+        try {
+            String bjson = fed.get(FedresursEndpoints.companyBankruptcy(companyGuid), refererFed());
             JsonNode broot = om.readTree(bjson);
 
-            // CaseEndDate из /bankruptcy, если ещё нет
-            if (row.caseEndDate == null || row.caseEndDate.isBlank() || "н/д".equals(row.caseEndDate)) {
-                String endIso = firstNonBlank(
-                        findDeep(broot, "caseEndDate", "endDate", "dateEnd", "finishDate", "completionDate", "dateFinish", "dateCompletion")
-                );
-                if (!endIso.isBlank()) {
-                    row.caseEndDate = Dates.toDdMmYyyyFromIsoDateTime(endIso);
-                }
-            }
-
-            // если CaseStatus пустой — пробуем boolean из /bankruptcy
+            // ✅ CaseStatus можно добить отсюда (если пустой)
             if (row.caseStatus == null || row.caseStatus.isBlank()) {
                 String s = statusFromBooleans(broot);
                 if (!s.isBlank()) row.caseStatus = s;
             }
 
+            // ❌ CaseEndDate здесь больше НЕ меняем
         } catch (Exception ignore) {}
     }
 
-    // =========================================================
-    // IEB block (расширенный, чтобы INN не пропадал)
-    // =========================================================
-    private void fillFromIeb(LegalEntityRow row, String guid) {
+    private void fillFromIeb(LegalEntityRow row, String companyGuid) {
         try {
-            String ij = fed.get(FedresursEndpoints.companyIeb(guid), refererFed());
+            String ij = fed.get(FedresursEndpoints.companyIeb(companyGuid), refererFed());
             JsonNode ir = om.readTree(ij);
 
             JsonNode pd0 = null;
@@ -202,18 +192,11 @@ public class LegalRowBuilder {
         } catch (Exception ignore) {}
     }
 
-    // =========================================================
-    // Helpers
-    // =========================================================
-    private String readCountSafe(String path, boolean isTrades) {
+    // ---------------- helpers ----------------
+
+    private String readCountSafe(String path) {
         try {
             String j = fed.get(path, refererFed());
-
-            if (isTrades && DEBUG_TRADES) {
-                System.out.println("TRADES URL = https://fedresurs.ru" + path);
-                System.out.println("TRADES RESP head = " + j.substring(0, Math.min(160, j.length())));
-            }
-
             JsonNode root = om.readTree(j);
 
             int found = root.path("found").asInt(-1);
@@ -232,6 +215,15 @@ public class LegalRowBuilder {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private static Map<String, String> refererFed() {
+        return Map.of("Referer", "https://fedresurs.ru/");
+    }
+
+    private static String firstNonBlank(String... xs) {
+        for (String x : xs) if (x != null && !x.isBlank()) return x.trim();
+        return "";
     }
 
     private static String extractProcedureTypeFromLastLegalCase(JsonNode last) {
@@ -276,15 +268,6 @@ public class LegalRowBuilder {
         target.sourceUrl = base.sourceUrl;
     }
 
-    private static Map<String, String> refererFed() {
-        return Map.of("Referer", "https://fedresurs.ru/");
-    }
-
-    private static String firstNonBlank(String... xs) {
-        for (String x : xs) if (x != null && !x.isBlank()) return x.trim();
-        return "";
-    }
-
     private static String findDeep(JsonNode root, String... keys) {
         if (root == null || root.isNull() || root.isMissingNode()) return "";
         for (String k : keys) {
@@ -300,7 +283,6 @@ public class LegalRowBuilder {
         if (node.isObject()) {
             JsonNode direct = node.get(key);
             if (direct != null && !direct.isNull()) {
-
                 String s = direct.asText("");
                 if (s != null && !s.isBlank()) return s;
 
@@ -323,22 +305,18 @@ public class LegalRowBuilder {
                 if (got != null && !got.isBlank()) return got;
             }
         }
-
         return null;
     }
 
-    // ========= статус из boolean (isActive / isFinished / isClosed ...) =========
     private static String statusFromBooleans(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) return "";
 
-        // ✅ активность дела часто обозначается так:
         Boolean active = findDeepBoolean(node,
                 "isActiveLegalCase", "activeLegalCase",
                 "isActiveCase", "activeCase",
                 "isActive", "active"
         );
 
-        // ✅ завершение тоже бывает под разными ключами
         Boolean finished = findDeepBoolean(node,
                 "isFinished", "finished",
                 "isEnded", "ended",
@@ -392,7 +370,6 @@ public class LegalRowBuilder {
         return null;
     }
 
-    // эвристика: похоже ли на процедуру ("Наблюдение/Конкурсное/...")
     private static boolean looksLikeProcedure(String s) {
         if (s == null) return false;
         String x = s.trim().toLowerCase();

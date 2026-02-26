@@ -47,12 +47,11 @@ public class PersonRowBuilder {
                 last.path("status").asText("")
         );
 
-        // ✅ ProcedureType — сделано по логике юрлиц (как в LegalRowBuilder)
+        // ProcedureType — логика как у юрлиц
         String statusName = last.path("status").path("name").asText("");
         String statusDesc = last.path("status").path("description").asText("");
 
         row.procedureType = firstNonBlank(
-                // сначала пытаемся вытащить реальную процедуру
                 last.path("procedure").path("name").asText(""),
                 last.path("procedure").path("description").asText(""),
                 last.path("procedure").path("type").asText(""),
@@ -60,7 +59,6 @@ public class PersonRowBuilder {
                 last.path("procedureType").asText(""),
                 last.path("procedureName").asText(""),
                 last.path("type").asText(""),
-                // fallback: иногда процедура сидит в status.*
                 looksLikeProcedure(statusName) ? statusName : "",
                 looksLikeProcedure(statusDesc) ? statusDesc : ""
         );
@@ -72,7 +70,6 @@ public class PersonRowBuilder {
                 last.path("manager").path("name").asText("")
         );
 
-        // region если он есть в списке
         row.region = firstNonBlank(
                 itemFromBankrotList.path("region").path("name").asText(""),
                 itemFromBankrotList.path("region").asText("")
@@ -80,7 +77,6 @@ public class PersonRowBuilder {
 
         // -----------------------------
         // 2) Карточка физлица (fedresurs.ru/backend/persons/{guid})
-        // Тут: ФИО, ИНН, СНИЛС, адрес, nameHistories (previousFullName)
         // -----------------------------
         String personPath = FedresursEndpoints.person(guid);
         String personJson = fed.get(personPath, refererFed());
@@ -88,7 +84,7 @@ public class PersonRowBuilder {
 
         mergePhysical(row, base);
 
-        // ✅ FullName fallback (на случай если карточка не дала ФИО)
+        // FullName fallback
         if (row.fullName == null || row.fullName.isBlank()) {
             row.fullName = firstNonBlank(
                     itemFromBankrotList.path("fullName").asText(""),
@@ -100,7 +96,6 @@ public class PersonRowBuilder {
             );
         }
 
-        // если region пуст — парсим из адреса
         if (row.region == null || row.region.isBlank()) {
             row.region = RegionExtractor.extract(row.residenceAddress);
         }
@@ -129,11 +124,7 @@ public class PersonRowBuilder {
             } catch (Exception ignore) {}
         }
 
-        // ✅ ТЗ: если предыдущего ФИО нет — ставим "н/д"
-        if (row.previousFullName == null || row.previousFullName.isBlank()) {
-            row.previousFullName = "н/д";
-        }
-
+        // ВАЖНО: ничего не подставляем. Если нет — остаётся пустым.
         return row;
     }
 
@@ -160,7 +151,7 @@ public class PersonRowBuilder {
                 row.entrepreneurOgrnip = ogrnip;
             }
 
-            // 2) OKVED (обычно объект okved: {code, name})
+            // 2) OKVED
             String okved = joinCodeName(
                     firstNonBlank(e0.path("okved").path("code").asText(""), e0.path("okvedCode").asText("")),
                     firstNonBlank(e0.path("okved").path("name").asText(""), e0.path("okvedName").asText(""))
@@ -170,7 +161,7 @@ public class PersonRowBuilder {
                 row.okved = okved;
             }
 
-            // 3) RegistrationDate (часто dateReg)
+            // 3) RegistrationDate
             String dateRegIso = firstNonBlank(
                     e0.path("dateReg").asText(""),
                     e0.path("registrationDate").asText(""),
@@ -198,7 +189,6 @@ public class PersonRowBuilder {
                 row.entrepreneurStatus = finalStatus;
             }
 
-            // TerminationDate обычно лежит в status.date, если isActive=false
             if (!isActive && (row.terminationDate == null || row.terminationDate.isBlank())) {
                 String termIso = firstNonBlank(
                         st.path("date").asText(""),
@@ -213,7 +203,7 @@ public class PersonRowBuilder {
     }
 
     // =========================================================
-    // merge helpers (только копирование)
+    // merge helpers
     // =========================================================
     private static void mergePhysical(PhysicalPersonRow target, PhysicalPersonRow base) {
         target.fullName = base.fullName;
@@ -246,7 +236,7 @@ public class PersonRowBuilder {
     }
 
     // =========================================================
-    // deep-find (поиск ключей в любом месте JSON)
+    // deep-find
     // =========================================================
     private static String findDeep(JsonNode root, String... keys) {
         if (root == null || root.isNull() || root.isMissingNode()) return "";
@@ -288,9 +278,6 @@ public class PersonRowBuilder {
         return null;
     }
 
-    // =========================================================
-    // эвристика: похоже ли на процедуру ("Наблюдение/Конкурсное/...")
-    // =========================================================
     private static boolean looksLikeProcedure(String s) {
         if (s == null) return false;
         String x = s.trim().toLowerCase();

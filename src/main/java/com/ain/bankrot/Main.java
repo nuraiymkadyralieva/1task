@@ -72,8 +72,8 @@ public class Main {
         PersonRowBuilder personBuilder = new PersonRowBuilder(fed);
 
         // ✅ сколько нужно выгрузить
-        int needLegals = 50;
-        int needPersons = 50;
+        int needLegals = 300;
+        int needPersons = 300;
 
         // ✅ мягкий размер страницы
         int pageSize = 15;
@@ -136,12 +136,18 @@ public class Main {
 
                         try {
                             sleepQuiet(SLEEP_MS);
-                            String tradesPathFed = FedresursEndpoints.companyTradesFed(guid, 1, 0);
-                            String tradesJsonFed = fed.get(tradesPathFed, referer("https://fedresurs.ru"));
-                            System.out.println("TRADES(FED) URL = https://fedresurs.ru" + tradesPathFed);
-                            System.out.println("TRADES(FED) head = " + head(tradesJsonFed));
+
+                            // guid тут должен быть bankruptGuid из списка /backend/cmpbankrupts или /backend/prsnbankrupts
+                            String bankruptGuid = guid;
+
+                            String biddingsPath = FedresursEndpoints.biddingsByBankruptGuid(bankruptGuid, 15, 0);
+                            String biddingsJson = fed.get(biddingsPath, referer("https://fedresurs.ru"));
+
+                            System.out.println("BIDDINGS(FED) URL = https://fedresurs.ru" + biddingsPath);
+                            System.out.println("BIDDINGS(FED) head = " + head(biddingsJson));
+
                         } catch (Exception e) {
-                            System.out.println("TRADES(FED) ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                            System.out.println("BIDDINGS(FED) ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                         }
 
                         try {

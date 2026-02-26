@@ -6,19 +6,51 @@ public final class Sheets {
 
     private Sheets() {}
 
-    public static final String LEGAL = "LegalEntities";
-    public static final String PHYSICAL = "PhysicalPersons";
+    public static final String LEGAL = "ЮрЛица";
+    public static final String PHYSICAL = "ФизЛица";
 
     public static final List<String> LEGAL_HEADERS = List.of(
-            "FullName","INN","OGRN","KPP","AuthorizedCapital","RegistrationDate","Address","Region",
-            "LegalForm","OKVED","Status","ProcedureType","CaseNumber","CaseStatus","CaseEndDate",
-            "ArbitrationManagerName","ArbitrationManagerINN","ManagerAppointmentDate",
-            "PublicationsCount","TradesCount","SourceURL"
+            "Полное наименование",
+            "ИНН",
+            "ОГРН",
+            "КПП",
+            "Уставный капитал",
+            "Дата регистрации",
+            "Адрес",
+            "Регион",
+            "ОПФ (ОКОПФ)",
+            "ОКВЭД",
+            "Статус организации",
+            "Процедура",
+            "Номер дела",
+            "Статус дела",
+            "Дата завершения дела",
+            "Арбитражный управляющий (ФИО)",
+            "Арбитражный управляющий (ИНН)",
+            "Дата назначения управляющего",
+            "Кол-во публикаций",
+            "Кол-во торгов",
+            "Источник (URL)"
     );
 
     public static final List<String> PHYSICAL_HEADERS = List.of(
-            "FullName","PreviousFullName","INN","SNILS","BirthDate","BirthPlace","ResidenceAddress","Region",
-            "EntrepreneurOGRNIP","EntrepreneurStatus","OKVED","RegistrationDate","TerminationDate",
-            "BankruptcyStatus","ProcedureType","CaseNumber","ArbitrationManagerName","SourceURL"
+            "ФИО",
+            "Предыдущее ФИО",
+            "ИНН",
+            "СНИЛС",
+            "Дата рождения",
+            "Место рождения",
+            "Адрес проживания",
+            "Регион",
+            "ОГРНИП",
+            "Статус ИП",
+            "ОКВЭД",
+            "Дата регистрации ИП",
+            "Дата прекращения ИП",
+            "Статус банкротства",
+            "Процедура",
+            "Номер дела",
+            "Арбитражный управляющий (ФИО)",
+            "Источник (URL)"
     );
 }

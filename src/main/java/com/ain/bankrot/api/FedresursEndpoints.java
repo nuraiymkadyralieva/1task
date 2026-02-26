@@ -3,43 +3,79 @@ package com.ain.bankrot.api;
 public final class FedresursEndpoints {
     private FedresursEndpoints() {}
 
-    // bankrot base
+    // =========================
+    // BANKROT LISTS (bankrot.fedresurs.ru backend)
+    // =========================
+
     public static String listCompanies(int limit, int offset) {
         return "/backend/cmpbankrupts?isActiveLegalCase=true&limit=" + limit + "&offset=" + offset;
     }
+
     public static String listPersons(int limit, int offset) {
         return "/backend/prsnbankrupts?isActiveLegalCase=true&limit=" + limit + "&offset=" + offset;
     }
 
-    // fed base
+    // =========================
+    // FEDRESURS CARDS (fedresurs.ru backend)
+    // =========================
+
     public static String company(String guid) {
         return "/backend/companies/" + guid;
-    }
-    public static String companyPublications(String guid, int limit, int offset) {
-        return "/backend/companies/" + guid + "/publications?limit=" + limit + "&offset=" + offset;
-    }
-    public static String companyTrades(String guid, int limit, int offset) {
-        return "/backend/cmpbankrupts/" + guid + "/trades?limit=" + limit + "&offset=" + offset;
-
-    }
-    public static String companyTradesFed(String guid, int limit, int offset) {
-        return "/backend/companies/" + guid + "/trades?limit=" + limit + "&offset=" + offset;
-
-    }
-    public static String companyBankruptcy(String guid) {
-        return "/backend/companies/" + guid + "/bankruptcy";
-    }
-    public static String companyIeb(String guid) {
-        return "/backend/companies/" + guid + "/ieb";
     }
 
     public static String person(String guid) {
         return "/backend/persons/" + guid;
     }
-    public static String personIndividualEntrepreneurs(String guid, int limit, int offset) {
-        return "/backend/persons/" + guid + "/individual-entrepreneurs?limit=" + limit + "&offset=" + offset;
+
+    // =========================
+    // PUBLICATIONS (fedresurs.ru backend)
+    // =========================
+
+    public static String companyPublications(String companyGuid, int limit, int offset) {
+        return "/backend/companies/" + companyGuid + "/publications?limit=" + limit + "&offset=" + offset;
     }
-    public static String personGeneralInfo(String guid) {
-        return "/backend/persons/" + guid + "/general-info";
+
+    // =========================
+    // BIDDINGS / TRADES (fedresurs.ru backend)
+    // Торги НЕ живут в /cmpbankrupts/{guid}/trades. Они живут в /backend/biddings?bankruptGuid=...
+    // =========================
+
+    /**
+     * Список торгов по банкроту (bankruptGuid берется из списка /backend/cmpbankrupts или /backend/prsnbankrupts).
+     * Пример:
+     * /backend/biddings?limit=15&offset=0&bankruptGuid=e59649c2-...
+     */
+    public static String biddingsByBankruptGuid(String bankruptGuid, int limit, int offset) {
+        return "/backend/biddings?limit=" + limit + "&offset=" + offset + "&bankruptGuid=" + bankruptGuid;
+    }
+
+    /** Детали торгов */
+    public static String bidding(String biddingGuid) {
+        return "/backend/biddings/" + biddingGuid;
+    }
+
+    /** Лоты торгов */
+    public static String biddingLots(String biddingGuid, int limit, int offset) {
+        return "/backend/biddings/" + biddingGuid + "/lots?limit=" + limit + "&offset=" + offset;
+    }
+
+    // =========================
+    // OPTIONAL (оставляем только если реально используешь в коде)
+    // =========================
+
+    public static String companyBankruptcy(String companyGuid) {
+        return "/backend/companies/" + companyGuid + "/bankruptcy";
+    }
+
+    public static String companyIeb(String companyGuid) {
+        return "/backend/companies/" + companyGuid + "/ieb";
+    }
+
+    public static String personGeneralInfo(String personGuid) {
+        return "/backend/persons/" + personGuid + "/general-info";
+    }
+
+    public static String personIndividualEntrepreneurs(String personGuid, int limit, int offset) {
+        return "/backend/persons/" + personGuid + "/individual-entrepreneurs?limit=" + limit + "&offset=" + offset;
     }
 }

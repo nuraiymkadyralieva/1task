@@ -22,33 +22,31 @@ public class CompanyMapper {
         row.ogrn     = text(root, "ogrn");
         row.kpp      = text(root, "kpp");
 
-        // --- адрес (у Fedresurs часто строкой) ---
+        // --- адрес ---
         row.address = firstNonBlank(
                 text(root, "address"),
                 text(root, "addressFgu"),
                 text(root, "addressEgrul"),
-                // fallback, если вдруг когда-то станет объектом
                 text(root.path("address"), "fullAddress", "value")
         );
 
-        // --- регион: сначала поле (если есть), иначе из адреса ---
+        // --- регион ---
         row.region = firstNonBlank(
                 text(root, "region"),
                 text(root.path("address"), "region", "regionName"),
                 RegionExtractor.extract(row.address)
         );
 
-        // --- ОКВЭД: лучше "код — имя" ---
+        // --- ОКВЭД ---
         row.okved = joinCodeName(
                 text(root.path("okved"), "code"),
                 text(root.path("okved"), "name")
         );
         if (row.okved.isBlank()) {
-            // fallback на плоские варианты
             row.okved = text(root, "okved", "okvedMain", "okvedCode");
         }
 
-        // --- ОКОПФ / ОПФ: тоже "код — имя" ---
+        // --- ОКОПФ/ОПФ ---
         row.legalForm = joinCodeName(
                 text(root.path("okopf"), "code"),
                 text(root.path("okopf"), "name")
@@ -57,20 +55,24 @@ public class CompanyMapper {
             row.legalForm = text(root, "okopf", "legalForm");
         }
 
-        // --- статус (у Fedresurs это объект status.name) ---
+        // --- статус ---
         row.status = firstNonBlank(
                 text(root.path("status"), "name"),
-                text(root, "status") // fallback
+                text(root, "status")
         );
 
-        // --- дата регистрации (у Fedresurs: dateReg) ---
-        String reg = firstNonBlank(
+        // ✅ ДАТА РЕГИСТРАЦИИ (расширили набор ключей)
+        String regIso = firstNonBlank(
                 text(root, "dateReg"),
-                text(root, "registrationDate", "regDate", "dateRegistration")
+                text(root, "registrationDate", "regDate", "dateRegistration"),
+                text(root, "egrulDateCreate", "dateCreate", "dateCreated")
         );
-        row.registrationDate = reg.contains("T")
-                ? Dates.toDdMmYyyyFromIsoDateTime(reg)
-                : reg;
+
+        row.registrationDate = toDdMmYyyyFlexible(regIso);
+
+        // ✅ ДАТА ЗАВЕРШЕНИЯ ДЕЛА — ТОЛЬКО из status.date
+        String endIso = text(root.path("status"), "date");
+        row.caseEndDate = toDdMmYyyyFlexible(endIso);
 
         // --- уставный капитал ---
         row.authorizedCapital = firstNonBlank(
@@ -79,6 +81,27 @@ public class CompanyMapper {
         );
 
         return row;
+    }
+
+    // ---------- helpers ----------
+
+    private static String toDdMmYyyyFlexible(String iso) {
+        if (iso == null) return "";
+        String s = iso.trim();
+        if (s.isEmpty()) return "";
+
+        // если пришло без времени: 2020-01-31
+        if (s.length() == 10 && s.charAt(4) == '-' && s.charAt(7) == '-') {
+            return Dates.toDdMmYyyyFromIsoDateTime(s + "T00:00:00");
+        }
+
+        // если пришло с временем
+        if (s.contains("T")) {
+            return Dates.toDdMmYyyyFromIsoDateTime(s);
+        }
+
+        // непонятный формат — оставим как есть (но без мусора)
+        return s;
     }
 
     private static String text(JsonNode node, String... keys) {

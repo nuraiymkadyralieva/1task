@@ -17,6 +17,7 @@ public class ExcelExporter implements AutoCloseable {
     private final Sheet physicalSheet;
 
     private final CellStyle headerStyle;
+    private final CellStyle dataStyle;
 
     private int legalRowIdx = 1;     // 0 — header
     private int physicalRowIdx = 1;
@@ -26,6 +27,7 @@ public class ExcelExporter implements AutoCloseable {
 
         // --- styles ---
         this.headerStyle = createHeaderStyle(wb);
+        this.dataStyle = createDataStyle(wb);
 
         // --- sheets ---
         this.legalSheet = wb.createSheet(Sheets.LEGAL);
@@ -56,12 +58,38 @@ public class ExcelExporter implements AutoCloseable {
         style.setAlignment(HorizontalAlignment.CENTER);
         style.setVerticalAlignment(VerticalAlignment.CENTER);
         style.setWrapText(true);
+
+        // приятный фон
+        style.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+        // границы
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+
+        return style;
+    }
+
+    private static CellStyle createDataStyle(Workbook wb) {
+        CellStyle style = wb.createCellStyle();
+        style.setWrapText(true);
+        style.setVerticalAlignment(VerticalAlignment.TOP);
+        style.setAlignment(HorizontalAlignment.LEFT);
+
+        // границы
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+
         return style;
     }
 
     private void writeHeader(Sheet sheet, List<String> headers) {
         Row r = sheet.createRow(0);
-        r.setHeightInPoints(18);
+        r.setHeightInPoints(28);
 
         for (int i = 0; i < headers.size(); i++) {
             Cell c = r.createCell(i, CellType.STRING);
@@ -71,13 +99,38 @@ public class ExcelExporter implements AutoCloseable {
     }
 
     /**
-     * ✅ FIX: Всегда создаём ячейку, даже если значение пустое.
-     * Иначе Excel получает "дырки" (ячейки физически нет), и некоторые колонки
-     * потом выглядят как "вечно пустые".
+     * Нормализация значений для Excel:
+     * - null/blank -> ""
+     * - "н/д", "-", "null" и похожие маркеры -> ""
+     * => "нет данных" всегда = пустая ячейка
+     */
+    private static String normalizeCellValue(String value) {
+        if (value == null) return "";
+        String v = value.trim();
+        if (v.isBlank()) return "";
+
+        String low = v.toLowerCase();
+
+        // русские
+        if (low.equals("н/д") || low.equals("н.д") || low.equals("нет данных")) return "";
+
+        // англ / частые маркеры
+        if (low.equals("null") || low.equals("none") || low.equals("undefined")) return "";
+
+        // прочие заглушки
+        if (v.equals("-") || v.equals("—")) return "";
+
+        return v;
+    }
+
+    /**
+     * Всегда создаём ячейку, даже если значение пустое.
+     * И всегда нормализуем "нет данных" в пустое.
      */
     private void setCell(Row row, int col, String value) {
         Cell cell = row.createCell(col, CellType.STRING);
-        cell.setCellValue(value == null ? "" : value.trim());
+        cell.setCellStyle(dataStyle);
+        cell.setCellValue(normalizeCellValue(value));
     }
 
     public void appendLegal(LegalEntityRow x) {
