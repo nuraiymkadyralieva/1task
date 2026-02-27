@@ -1,27 +1,15 @@
-# Python
-venv/
-.venv/
-__pycache__/
-*.pyc
-
-# IDE
-.idea/
-.vscode/
-
-# build
-build/
-dist/
-
-# OS
-.DS_Store
-# IntelliJ
+# IntelliJ IDEA
 .idea/
 *.iml
 out/
 
-# Excel + временные Office
-*.xls
+# Maven
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Excel exports / temp files
 *.xlsx
-*.xlsm
-*.xlsb
 ~$*.xlsx
