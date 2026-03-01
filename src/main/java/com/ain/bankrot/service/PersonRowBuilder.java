@@ -82,9 +82,10 @@ public class PersonRowBuilder {
         String personJson = fed.get(personPath, refererFed());
         PhysicalPersonRow base = personMapper.fromPersonJson(personJson, "https://fedresurs.ru" + personPath);
 
+        // ✅ важно: НЕ ЗАТИРАТЬ пустыми значениями
         mergePhysical(row, base);
 
-        // FullName fallback
+        // FullName fallback: берём из списка банкротов, если карточка не дала имя
         if (row.fullName == null || row.fullName.isBlank()) {
             row.fullName = firstNonBlank(
                     itemFromBankrotList.path("fullName").asText(""),
@@ -107,19 +108,23 @@ public class PersonRowBuilder {
 
         // -----------------------------
         // 4) PreviousFullName fallback: /general-info (если пусто)
+        //     По ТЗ мы храним ФАМИЛИЮ, значит превращаем строку -> фамилию
         // -----------------------------
         if (row.previousFullName == null || row.previousFullName.isBlank()) {
             try {
                 String gj = fed.get(FedresursEndpoints.personGeneralInfo(guid), refererFed());
                 JsonNode gr = om.readTree(gj);
 
-                String prev = firstNonBlank(
+                String prevFio = firstNonBlank(
                         findDeep(gr, "previousFullName", "previousName", "oldName"),
                         findDeep(gr, "fioPrevious", "fullNamePrevious")
                 );
 
-                if (!prev.isBlank() && (row.fullName == null || !prev.equalsIgnoreCase(row.fullName))) {
-                    row.previousFullName = prev;
+                prevFio = prevFio == null ? "" : prevFio.trim();
+
+                if (!prevFio.isBlank()) {
+                    String prevSurname = prevFio.split("\\s+")[0].trim();
+                    if (!prevSurname.isBlank()) row.previousFullName = prevSurname;
                 }
             } catch (Exception ignore) {}
         }
@@ -206,15 +211,23 @@ public class PersonRowBuilder {
     // merge helpers
     // =========================================================
     private static void mergePhysical(PhysicalPersonRow target, PhysicalPersonRow base) {
-        target.fullName = base.fullName;
-        target.previousFullName = base.previousFullName;
-        target.inn = base.inn;
-        target.snils = base.snils;
-        target.birthDate = base.birthDate;
-        target.birthPlace = base.birthPlace;
-        target.residenceAddress = base.residenceAddress;
-        if (target.region == null || target.region.isBlank()) target.region = base.region;
-        target.sourceUrl = base.sourceUrl;
+
+        if (base.fullName != null && !base.fullName.isBlank()) target.fullName = base.fullName;
+        if (base.previousFullName != null && !base.previousFullName.isBlank()) target.previousFullName = base.previousFullName;
+
+        if (base.inn != null && !base.inn.isBlank()) target.inn = base.inn;
+        if (base.snils != null && !base.snils.isBlank()) target.snils = base.snils;
+
+        if (base.birthDate != null && !base.birthDate.isBlank()) target.birthDate = base.birthDate;
+        if (base.birthPlace != null && !base.birthPlace.isBlank()) target.birthPlace = base.birthPlace;
+
+        if (base.residenceAddress != null && !base.residenceAddress.isBlank()) target.residenceAddress = base.residenceAddress;
+
+        if ((target.region == null || target.region.isBlank()) && base.region != null && !base.region.isBlank()) {
+            target.region = base.region;
+        }
+
+        if (base.sourceUrl != null && !base.sourceUrl.isBlank()) target.sourceUrl = base.sourceUrl;
     }
 
     private static Map<String, String> refererFed() {

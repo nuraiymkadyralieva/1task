@@ -13,3 +13,8 @@ Thumbs.db
 # Excel exports / temp files
 *.xlsx
 ~$*.xlsx
+*.swp          # временные файлы редакторов
+*.swo
+*~
+.vscode/       # VS Code конфиги (хорошо бы исключить)
+.env           # если есть локальные переменные

@@ -55,8 +55,16 @@ public class PersonMapper {
         // --- регион из адреса ---
         row.region = RegionExtractor.extract(row.residenceAddress);
 
-        // --- прошлое ФИО ---
-        row.previousFullName = extractPreviousName(p);
+        // --- "предыдущее ФИО" по ТЗ = ПРЕДЫДУЩАЯ ФАМИЛИЯ ---
+        row.previousFullName = extractPreviousSurname(p);
+
+        // защита: если предыдущая фамилия = текущая фамилия, очищаем
+        String currentSurname = extractSurnameFromFio(row.fullName);
+        if (!row.previousFullName.isBlank()
+                && !currentSurname.isBlank()
+                && row.previousFullName.equalsIgnoreCase(currentSurname)) {
+            row.previousFullName = "";
+        }
 
         return row;
     }
@@ -72,7 +80,7 @@ public class PersonMapper {
         );
         if (!deep.isBlank()) return normalizeSpaces(deep);
 
-        // 1) прямые поля (как было)
+        // 1) прямые поля
         String direct = firstNonBlank(
                 p.path("fullName").asText(""),
                 p.path("fio").asText(""),
@@ -96,27 +104,71 @@ public class PersonMapper {
         return normalizeSpaces((last2 + " " + first2 + " " + middle2));
     }
 
-    /** Достаёт предыдущее ФИО из nameHistories + deep-fallback */
-    private static String extractPreviousName(JsonNode p) {
+    /**
+     * По ТЗ: в колонке "Предыдущее ФИО" храним только ПРЕДЫДУЩУЮ ФАМИЛИЮ.
+     *
+     * ВАЖНО: в твоём реальном JSON `nameHistories` может быть МАССИВОМ СТРОК:
+     *   "nameHistories": ["Скрипкина Оксана Васильевна"]
+     */
+    private static String extractPreviousSurname(JsonNode p) {
 
-        // 1) стандартный массив nameHistories
         JsonNode histories = p.path("nameHistories");
         if (histories.isArray()) {
             for (JsonNode h : histories) {
-                String prev = firstNonBlank(
+
+                // ✅ A) history как СТРОКА
+                if (h.isTextual()) {
+                    String prevFio = normalizeSpaces(h.asText(""));
+                    if (!prevFio.isBlank()) {
+                        return extractSurnameFromFio(prevFio); // -> "Скрипкина"
+                    }
+                }
+
+                // ✅ B) history как объект, фамилия отдельно
+                String prevLast = firstNonBlank(
+                        h.path("lastName").asText(""),
+                        h.path("surname").asText("")
+                );
+                if (!prevLast.isBlank()) return normalizeSpaces(prevLast);
+
+                // ✅ C) history как объект, ФИО строкой
+                String prevFio = firstNonBlank(
                         h.path("fullName").asText(""),
                         h.path("fio").asText(""),
                         h.path("name").asText("")
                 );
-                if (!prev.isBlank()) return normalizeSpaces(prev);
+                String lastFromFio = extractSurnameFromFio(prevFio);
+                if (!lastFromFio.isBlank()) return lastFromFio;
+
+                // ✅ D) history как объект, раздельные части
+                String last = firstNonBlank(h.path("lastName").asText(""), h.path("surname").asText(""));
+                String first = firstNonBlank(h.path("firstName").asText(""), h.path("givenName").asText(""));
+                String middle = firstNonBlank(h.path("middleName").asText(""), h.path("patronymic").asText(""));
+                String combined = normalizeSpaces(last + " " + first + " " + middle);
+                if (!combined.isBlank()) return extractSurnameFromFio(combined);
             }
         }
 
-        // 2) если ключ в другом виде или вложенно
-        String deepPrev = firstNonBlank(
+        // deep-fallback: ключи именно для фамилии
+        String deepLast = firstNonBlank(
+                findDeep(p, "previousLastName", "oldLastName", "surnamePrevious", "lastNamePrevious"),
+                findDeep(p, "previousSurname", "oldSurname")
+        );
+        if (!deepLast.isBlank()) return normalizeSpaces(deepLast);
+
+        // deep: если дали "предыдущее ФИО" строкой — берём фамилию как первое слово
+        String deepFio = firstNonBlank(
                 findDeep(p, "previousFullName", "previousName", "oldName", "fioPrevious", "fullNamePrevious")
         );
-        return normalizeSpaces(deepPrev);
+        return extractSurnameFromFio(deepFio);
+    }
+
+    /** Эвристика RU ФИО: "Фамилия Имя Отчество" -> фамилия = первое слово */
+    private static String extractSurnameFromFio(String fio) {
+        String s = normalizeSpaces(fio);
+        if (s.isBlank()) return "";
+        String[] parts = s.split(" ");
+        return parts.length > 0 ? parts[0].trim() : "";
     }
 
     private static String normalizeSpaces(String s) {

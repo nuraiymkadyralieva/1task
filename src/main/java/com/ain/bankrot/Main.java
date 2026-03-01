@@ -17,13 +17,11 @@ public class Main {
 
     private static final int HEAD = 350;
 
-    // ✅ включай только когда реально нужно дебажить
-    private static final boolean DEBUG_PER_ITEM = false;
+    // ✅ включай, если хочешь увидеть, как реально заполняются ФИО/прежняя фамилия у первых N людей
+    private static final boolean DEBUG_FIRST_PERSONS = true;
+    private static final int DEBUG_PERSONS_LIMIT = 3;
 
-    // ✅ сколько элементов разрешаем "дебажить" (чтобы не устроить DDoS)
-    private static final int DEBUG_ITEMS_LIMIT = 1;
-
-    // ✅ небольшая пауза между запросами (снижает шанс 451/403)
+    // ✅ небольшая пауза между запросами
     private static final long SLEEP_MS = 200;
 
     private static String head(String s) {
@@ -43,9 +41,14 @@ public class Main {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
     }
 
+    private static String firstNonBlank(String... xs) {
+        for (String x : xs) if (x != null && !x.isBlank()) return x.trim();
+        return "";
+    }
+
     public static void main(String[] args) throws Exception {
 
-        // ✅ чуть более "браузерные" заголовки
+        // ✅ заголовки
         Map<String, String> headersBankrot = Map.of(
                 "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 "Accept", "application/json, text/plain, */*",
@@ -72,10 +75,10 @@ public class Main {
         PersonRowBuilder personBuilder = new PersonRowBuilder(fed);
 
         // ✅ сколько нужно выгрузить
-        int needLegals = 300;
-        int needPersons = 300;
+        int needLegals =500;
+        int needPersons = 500;
 
-        // ✅ мягкий размер страницы
+        // ✅ размер страницы
         int pageSize = 15;
 
         int exportedLegals = 0;
@@ -86,7 +89,6 @@ public class Main {
             // ---------------- LEGALS ----------------
             int offset = 0;
             int got = 0;
-            int debugDone = 0;
 
             while (got < needLegals) {
 
@@ -109,67 +111,9 @@ public class Main {
                     System.out.println("LEGAL GUID = " + guid);
                     System.out.println("LEGAL caseNumber = " + caseNumber);
 
-                    // 1) строим строку
                     LegalEntityRow row = legalBuilder.buildFromListItem(item);
                     excel.appendLegal(row);
                     exportedLegals++;
-
-                    // 2) DEBUG запросы — только если включено и только для первых DEBUG_ITEMS_LIMIT
-                    if (DEBUG_PER_ITEM && debugDone < DEBUG_ITEMS_LIMIT) {
-                        debugDone++;
-
-                        // candidates — опасная часть: много запросов. Поэтому только 1 элемент.
-                        String[] candidates = new String[] {
-                                "/backend/cmpbankrupts/" + guid + "/trades?limit=1&offset=0",
-                                "/backend/cmpbankrupts/" + guid + "/publications?limit=1&offset=0"
-                        };
-
-                        for (String p : candidates) {
-                            try {
-                                sleepQuiet(SLEEP_MS);
-                                String resp = bankrot.get(p, Map.of("Referer", "https://bankrot.fedresurs.ru/"));
-                                System.out.println("OK 200: https://bankrot.fedresurs.ru" + p + " head=" + head(resp));
-                            } catch (Exception e) {
-                                System.out.println("FAIL: https://bankrot.fedresurs.ru" + p + " -> " + e.getMessage());
-                            }
-                        }
-
-                        try {
-                            sleepQuiet(SLEEP_MS);
-
-                            // guid тут должен быть bankruptGuid из списка /backend/cmpbankrupts или /backend/prsnbankrupts
-                            String bankruptGuid = guid;
-
-                            String biddingsPath = FedresursEndpoints.biddingsByBankruptGuid(bankruptGuid, 15, 0);
-                            String biddingsJson = fed.get(biddingsPath, referer("https://fedresurs.ru"));
-
-                            System.out.println("BIDDINGS(FED) URL = https://fedresurs.ru" + biddingsPath);
-                            System.out.println("BIDDINGS(FED) head = " + head(biddingsJson));
-
-                        } catch (Exception e) {
-                            System.out.println("BIDDINGS(FED) ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                        }
-
-                        try {
-                            sleepQuiet(SLEEP_MS);
-                            String bankruptcyPath = FedresursEndpoints.companyBankruptcy(guid);
-                            String bankruptcyJson = fed.get(bankruptcyPath, referer("https://fedresurs.ru"));
-                            System.out.println("BANKRUPTCY URL = https://fedresurs.ru" + bankruptcyPath);
-                            System.out.println("BANKRUPTCY RESP head = " + head(bankruptcyJson));
-                        } catch (Exception e) {
-                            System.out.println("BANKRUPTCY ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                        }
-
-                        try {
-                            sleepQuiet(SLEEP_MS);
-                            String iebPath = FedresursEndpoints.companyIeb(guid);
-                            String iebJson = fed.get(iebPath, referer("https://fedresurs.ru"));
-                            System.out.println("IEB URL = https://fedresurs.ru" + iebPath);
-                            System.out.println("IEB RESP head = " + head(iebJson));
-                        } catch (Exception e) {
-                            System.out.println("IEB ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                        }
-                    }
 
                     got++;
                     if (got >= needLegals) break;
@@ -182,6 +126,8 @@ public class Main {
             // ---------------- PERSONS ----------------
             offset = 0;
             got = 0;
+
+            int debugShown = 0;
 
             while (got < needPersons) {
 
@@ -200,16 +146,44 @@ public class Main {
                     String guid = safeText(item.path("guid"));
                     String caseNumber = safeText(item.path("lastLegalCase").path("number"));
 
+                    // ✅ ФИО ИЗ СПИСКА (bankrot) — это наш стабильный источник current fullName
+                    String fioFromList = firstNonBlank(
+                            safeText(item.path("fullName")),
+                            safeText(item.path("fio")),
+                            safeText(item.path("name")),
+                            safeText(item.path("debtor").path("fullName")),
+                            safeText(item.path("debtor").path("fio")),
+                            safeText(item.path("debtor").path("name"))
+                    );
+
                     System.out.println("\n--- PERSON ITEM ---");
                     System.out.println("PERSON GUID = " + guid);
                     System.out.println("PERSON caseNumber = " + caseNumber);
+                    if (!fioFromList.isBlank()) System.out.println("PERSON fioFromList = " + fioFromList);
 
                     PhysicalPersonRow row = personBuilder.buildFromListItem(item);
+
+                    // ✅ ДУБЛЬ-СТРАХОВКА: если builder вдруг вернул пусто — подставим ФИО из списка
+                    if ((row.fullName == null || row.fullName.isBlank()) && !fioFromList.isBlank()) {
+                        row.fullName = fioFromList;
+                    }
+
+                    // ✅ дебаг первых N физлиц: покажем, заполнилась ли прежняя фамилия
+                    if (DEBUG_FIRST_PERSONS && debugShown < DEBUG_PERSONS_LIMIT) {
+                        debugShown++;
+                        System.out.println("PARSED fullName = " + (row.fullName == null ? "" : row.fullName));
+                        System.out.println("PARSED previousSurname = " + (row.previousFullName == null ? "" : row.previousFullName));
+                        System.out.println("PARSED inn = " + (row.inn == null ? "" : row.inn));
+                        System.out.println("PARSED snils = " + (row.snils == null ? "" : row.snils));
+                    }
+
                     excel.appendPhysical(row);
                     exportedPersons++;
 
                     got++;
                     if (got >= needPersons) break;
+
+                    sleepQuiet(SLEEP_MS);
                 }
 
                 offset += pageSize;
